@@ -1,125 +1,268 @@
 pipeline {
 
-    agent any
-
-    environment {
-        AWS_REGION      = "ap-south-1"
-        AWS_ACCOUNT_ID  = "138300868541"
-        ECR_REGISTRY    = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-        BACKEND_REPO    = "backend"
-        FRONTEND_REPO   = "frontend"
-
-        IMAGE_TAG       = "${env.BUILD_NUMBER}"
-    }
+agent any
 
 
-    stages {
+environment {
 
-        stage('Checkout Code') {
-            steps {
-                checkout scm
-            }
-        }
+AWS_REGION="ap-south-1"
 
+AWS_ACCOUNT_ID="138300868541"
 
-        stage('Test Backend') {
-            steps {
-                dir('services/backend') {
-                    sh '''
-                    npm install
-                    npm test
-                    '''
-                }
-            }
-        }
+ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+BACKEND_REPO="backend"
+
+FRONTEND_REPO="frontend"
+
+IMAGE_TAG="${BUILD_NUMBER}"
+
+}
 
 
-        stage('AWS ECR Login') {
-            steps {
-                sh '''
-                aws ecr get-login-password --region ${AWS_REGION} | \
-                docker login --username AWS \
-                --password-stdin ${ECR_REGISTRY}
-                '''
-            }
-        }
+stages {
 
 
-        stage('Build & Push Backend Image') {
-            steps {
-                dir('services/backend') {
-                    sh '''
-                    docker build \
-                    -t ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} \
-                    -t ${ECR_REGISTRY}/${BACKEND_REPO}:latest .
+stage('Checkout') {
 
-                    docker push ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
-                    docker push ${ECR_REGISTRY}/${BACKEND_REPO}:latest
-                    '''
-                }
-            }
-        }
+steps {
+
+checkout scm
+
+}
+
+}
 
 
-        stage('Build & Push Frontend Image') {
-            steps {
-                dir('services/frontend') {
-                    sh '''
-                    docker build \
-                    -t ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} \
-                    -t ${ECR_REGISTRY}/${FRONTEND_REPO}:latest .
 
-                    docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
-                    docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
-                    '''
-                }
-            }
-        }
+stage('Gitleaks Secret Scan') {
 
+steps {
 
-        stage('Deploy using Helm') {
-            steps {
-                dir('helm/myapp') {
-                    sh '''
-                    helm upgrade --install myapp . \
-                    --set backend.image.repository=${ECR_REGISTRY}/${BACKEND_REPO} \
-                    --set backend.image.tag=${IMAGE_TAG} \
-                    --set frontend.image.repository=${ECR_REGISTRY}/${FRONTEND_REPO} \
-                    --set frontend.image.tag=${IMAGE_TAG} \
-                    --wait \
-                    --timeout 120s
-                    '''
-                }
-            }
-        }
+sh '''
+
+echo "Running Secret Scan"
+
+gitleaks detect \
+--source . \
+--exit-code 0
+
+'''
+
+}
+
+}
 
 
-        stage('Verify Kubernetes Deployment') {
-            steps {
-                sh '''
-                kubectl get pods
-                helm list
-                '''
-            }
-        }
-    }
+
+stage('Backend Test') {
+
+steps {
+
+dir('services/backend') {
+
+sh '''
+
+npm install
+
+npm test
+
+'''
+
+}
+
+}
+
+}
 
 
-    post {
 
-        success {
-            echo "CI/CD Deployment Successful - Build ${IMAGE_TAG}"
-        }
+stage('Trivy File System Scan') {
 
-        failure {
-            echo "Pipeline Failed - Check Jenkins Logs"
-        }
+steps {
 
-        always {
-            sh '''
-            docker logout ${ECR_REGISTRY} || true
-            '''
-        }
-    }
+sh '''
+
+trivy fs . \
+--severity HIGH,CRITICAL \
+--exit-code 0
+
+'''
+
+}
+
+}
+
+
+
+stage('AWS ECR Login') {
+
+steps {
+
+sh '''
+
+aws ecr get-login-password \
+--region ${AWS_REGION} |
+
+docker login \
+--username AWS \
+--password-stdin ${ECR_REGISTRY}
+
+'''
+
+}
+
+}
+
+
+
+stage('Build Backend Image') {
+
+steps {
+
+dir('services/backend') {
+
+sh '''
+
+docker build \
+-t ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} .
+
+docker push \
+${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
+
+'''
+
+}
+
+}
+
+}
+
+
+
+stage('Scan Backend Image') {
+
+steps {
+
+sh '''
+
+trivy image \
+${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} \
+--severity HIGH,CRITICAL \
+--exit-code 0
+
+'''
+
+}
+
+}
+
+
+
+stage('Build Frontend Image') {
+
+steps {
+
+dir('services/frontend') {
+
+sh '''
+
+docker build \
+-t ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} .
+
+docker push \
+${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
+
+'''
+
+}
+
+}
+
+}
+
+
+
+stage('Scan Frontend Image') {
+
+steps {
+
+sh '''
+
+trivy image \
+${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} \
+--severity HIGH,CRITICAL \
+--exit-code 0
+
+'''
+
+}
+
+}
+
+
+
+stage('Deploy Helm') {
+
+steps {
+
+dir('helm/myapp') {
+
+sh '''
+
+helm upgrade --install myapp . \
+--set backend.image.repository=${ECR_REGISTRY}/${BACKEND_REPO} \
+--set backend.image.tag=${IMAGE_TAG} \
+--set frontend.image.repository=${ECR_REGISTRY}/${FRONTEND_REPO} \
+--set frontend.image.tag=${IMAGE_TAG}
+
+'''
+
+}
+
+}
+
+}
+
+
+
+stage('Verify Deployment') {
+
+steps {
+
+sh '''
+
+kubectl get pods
+
+helm list
+
+'''
+
+}
+
+}
+
+
+}
+
+
+post {
+
+
+success {
+
+echo "DEVSECOPS PIPELINE COMPLETED SUCCESSFULLY"
+
+}
+
+
+failure {
+
+echo "PIPELINE FAILED"
+
+}
+
+
+}
+
 }
