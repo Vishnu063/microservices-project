@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Microservices Demo</title>
+  <style>
+    body { font-family: -apple-system, Arial, sans-serif; max-width: 600px; margin: 80px auto; text-align: center; }
+    h1 { color: #2563eb; }
+    #count { font-size: 3rem; font-weight: bold; color: #16a34a; }
+    #meta { color: #666; font-size: 0.85rem; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Microservices CI/CD Demo</h1>
+  <p>Total visits (tracked in Redis via the backend API):</p>
+  <div id="count">Loading...</div>
+  <div id="meta"></div>
+
+  <script>
+    fetch('/api/visits')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('count').textContent = data.visits;
+        document.getElementById('meta').textContent =
+          `Served by pod: ${data.servedBy} | ${data.timestamp}`;
+      })
+      .catch(() => {
+        document.getElementById('count').textContent = 'Error reaching backend';
+      });
+  </script>
+</body>
+</html>
