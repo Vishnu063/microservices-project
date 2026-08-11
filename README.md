@@ -1,1009 +1,260 @@
-
-````bash
-cd ~/microservices-project
-
-cp README.md README.backup.md
-
-cat > README.md <<'EOF'
 # 🚀 Microservices DevSecOps CI/CD Platform
 
-A production-style **DevSecOps CI/CD platform built on AWS**.
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-Jenkins-D24939?logo=jenkins&logoColor=white)](#-cicd-pipeline)
+[![IaC](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform&logoColor=white)](#%EF%B8%8F-aws-infrastructure)
+[![Kubernetes](https://img.shields.io/badge/Orchestration-Kubernetes%20(k3s)-326CE5?logo=kubernetes&logoColor=white)](#%EF%B8%8F-kubernetes-deployment)
+[![Security](https://img.shields.io/badge/Security-Trivy%20%7C%20Gitleaks-critical)](#-devsecops-security)
+[![Monitoring](https://img.shields.io/badge/Monitoring-Prometheus%20%7C%20Grafana-E6522C?logo=prometheus&logoColor=white)](#-monitoring)
 
-This project demonstrates the complete application delivery lifecycle:
+A production-style **DevSecOps CI/CD platform** on AWS that takes an application from a `git push` to a running, monitored deployment on Kubernetes — with security scanning built into the pipeline as an enforced gate, not an afterthought.
 
-```text
-Developer
-    ↓
-GitHub
-    ↓
-Jenkins
-    ↓
-Gitleaks + Tests
-    ↓
-Docker Build
-    ↓
-Trivy Security Scan
-    ↓
-Amazon ECR
-    ↓
-Helm
-    ↓
-Amazon EKS
-    ↓
-Kubernetes
-    ↓
-Frontend + Backend + Redis
-    ↓
-Prometheus + Grafana
-````
-
----
-
-# 🏗️ Architecture
-
-```text
-                         ┌──────────────────────┐
-                         │      DEVELOPER       │
-                         │                      │
-                         │ Frontend             │
-                         │ Backend              │
-                         │ Dockerfiles          │
-                         │ Helm Charts          │
-                         │ Jenkinsfile          │
-                         └──────────┬───────────┘
-                                    │
-                                 git push
-                                    │
-                                    ▼
-                         ┌──────────────────────┐
-                         │       GITHUB         │
-                         │                      │
-                         │ Source Code          │
-                         │ Jenkinsfile          │
-                         │ Dockerfiles          │
-                         │ Helm                  │
-                         │ Infrastructure       │
-                         └──────────┬───────────┘
-                                    │
-                              CI/CD Trigger
-                                    │
-                                    ▼
-                    ┌──────────────────────────────┐
-                    │           JENKINS            │
-                    │                              │
-                    │        CI/CD PIPELINE        │
-                    └──────────────┬───────────────┘
-                                   │
-              ┌────────────────────┼────────────────────┐
-              │                    │                    │
-              ▼                    ▼                    ▼
-       ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-       │  GITLEAKS   │      │    TESTS    │      │   DOCKER    │
-       │             │      │             │      │    BUILD    │
-       │ Secret Scan │      │ Application │      │             │
-       │             │      │ Tests       │      │ Frontend    │
-       └─────────────┘      └─────────────┘      │ Backend     │
-                                                  └──────┬──────┘
-                                                         │
-                                                         ▼
-                                                  ┌─────────────┐
-                                                  │    TRIVY    │
-                                                  │             │
-                                                  │ Image Scan  │
-                                                  │ CVE Scan    │
-                                                  └──────┬──────┘
-                                                         │
-                                                   Scan Passed
-                                                         │
-                                                         ▼
-                                      ┌─────────────────────────────┐
-                                      │         AMAZON ECR           │
-                                      │                             │
-                                      │  frontend:<BUILD_NUMBER>   │
-                                      │  backend:<BUILD_NUMBER>    │
-                                      │                             │
-                                      └──────────────┬──────────────┘
-                                                     │
-                                               Image Reference
-                                                     │
-                                                     ▼
-                                      ┌─────────────────────────────┐
-                                      │            HELM             │
-                                      │                             │
-                                      │ Chart: helm/myapp           │
-                                      │ Repository: ECR             │
-                                      │ Tag: Jenkins BUILD_NUMBER   │
-                                      └──────────────┬──────────────┘
-                                                     │
-                                              helm upgrade
-                                                     │
-                                                     ▼
-              ┌────────────────────────────────────────────────────────┐
-              │                       AMAZON EKS                        │
-              │                                                        │
-              │                    microservices-eks                    │
-              │                                                        │
-              │  ┌──────────────────────────────────────────────────┐  │
-              │  │              MANAGED NODE GROUP                  │  │
-              │  │                                                  │  │
-              │  │   ┌────────────────┐    ┌────────────────┐       │  │
-              │  │   │   t3.small     │    │   t3.small     │       │  │
-              │  │   │    NODE 1      │    │    NODE 2      │       │  │
-              │  │   │                │    │                │       │  │
-              │  │   │ 172.31.20.63   │    │ 172.31.46.26   │       │  │
-              │  │   └───────┬────────┘    └───────┬────────┘       │  │
-              │  └───────────┼─────────────────────┼────────────────┘  │
-              │              │                     │                   │
-              │              └──────────┬──────────┘                   │
-              │                         │                              │
-              │                         ▼                              │
-              │              ┌─────────────────────┐                  │
-              │              │ Kubernetes Scheduler│                  │
-              │              └──────────┬──────────┘                  │
-              │                         │                              │
-              │              ┌──────────┼───────────┐                  │
-              │              │          │           │                  │
-              │              ▼          ▼           ▼                  │
-              │        ┌──────────┐ ┌──────────┐ ┌──────────┐          │
-              │        │ FRONTEND │ │ BACKEND  │ │  REDIS   │          │
-              │        │          │ │          │ │          │          │
-              │        │ 2 Pods   │ │ 2 Pods   │ │ 1 Pod    │          │
-              │        └────┬─────┘ └────┬─────┘ └────┬─────┘          │
-              │             │            │            │                │
-              │             └────────────┼────────────┘                │
-              │                          │                             │
-              │                          ▼                             │
-              │                 Kubernetes Services                   │
-              │                          │                             │
-              └──────────────────────────┼─────────────────────────────┘
-                                         │
-                                         ▼
-                              ┌─────────────────────┐
-                              │ PROMETHEUS + GRAFANA │
-                              │                     │
-                              │ Node Metrics        │
-                              │ Pod Metrics         │
-                              │ CPU / Memory        │
-                              │ Cluster Health      │
-                              └─────────────────────┘
+```
+Code Commit → Secret Scan → Test → Docker Build → Image Scan → Push to ECR → Kubernetes Deploy → Monitoring
 ```
 
 ---
 
-# 🔄 Complete CI/CD Flow
+## 📋 Table of Contents
 
-The pipeline works in this order:
-
-```text
-1. Developer writes code
-          ↓
-2. Code pushed to GitHub
-          ↓
-3. Jenkins checks out code
-          ↓
-4. Gitleaks scans for secrets
-          ↓
-5. Application tests run
-          ↓
-6. Docker images are built
-          ↓
-7. Trivy scans Docker images
-          ↓
-8. Images pushed to Amazon ECR
-          ↓
-9. Jenkins generates image tag
-          ↓
-10. Helm receives ECR image
-          ↓
-11. Helm deploys to EKS
-          ↓
-12. Kubernetes creates/updates Pods
-          ↓
-13. Jenkins verifies deployment
-          ↓
-14. Prometheus collects metrics
-          ↓
-15. Grafana displays metrics
-```
+- [Architecture](#-architecture)
+- [Technology Stack](#-technology-stack)
+- [CI/CD Pipeline Flow](#-cicd-pipeline-flow)
+- [DevSecOps Security](#-devsecops-security)
+- [AWS Infrastructure](#%EF%B8%8F-aws-infrastructure)
+- [Project Structure](#-project-structure)
+- [Running Locally](#-running-locally)
+- [Deployment](#-deployment)
+- [Useful Commands](#-useful-commands)
+- [Roadmap](#-roadmap)
+- [Author](#-author)
 
 ---
 
-# 🔐 Security Flow
+## 🏗️ Architecture
 
-Security is integrated into the CI/CD pipeline.
-
-```text
-                 CODE
-                   │
-                   ▼
-              ┌─────────┐
-              │ Gitleaks│
-              └────┬────┘
-                   │
-              Secret Found?
-              /           \
-            YES            NO
-             │             │
-             ▼             ▼
-           STOP          Continue
-                           │
-                           ▼
-                     Docker Build
-                           │
-                           ▼
-                        Trivy
-                           │
-                    Vulnerability?
-                     /          \
-                   YES           NO
-                    │             │
-                    ▼             ▼
-                  STOP          ECR
 ```
+                         GitHub Repository
+                                │
+                                ▼
+                        Jenkins Pipeline
+                                │
+        ┌───────────┬──────────┼──────────┬───────────────┐
+        ▼           ▼          ▼           ▼               │
+   Unit Tests    Gitleaks    Trivy    Docker Build          │
+   (fail fast)  (secrets)  (image     (backend +            │
+                            CVEs)      frontend)             │
+        └───────────┴──────────┴──────────┘                 │
+                                │                             │
+                                ▼                             │
+                       Amazon ECR Registry                   │
+                                │                             │
+                                ▼                             │
+                         Helm Deployment                     │
+                                │                             │
+                                ▼                             │
+                    Kubernetes (k3s Cluster)                 │
+                                │                             │
+              ┌─────────────────┼─────────────────┐          │
+              ▼                 ▼                 ▼          │
+          Frontend           Backend            Redis         │
+              │                 │                 │          │
+              └─────────────────┴─────────────────┘          │
+                                │                             │
+                                ▼                             │
+                  Prometheus + Grafana Monitoring ◄───────────┘
+```
+
+**Design principle:** every stage before "Push to ECR" is a **gate**, not a report. If Gitleaks finds a secret or Trivy finds a HIGH/CRITICAL CVE, the pipeline stops — the image never reaches the registry or the cluster.
 
 ---
 
-# 🔐 Gitleaks
+## 🛠️ Technology Stack
 
-Gitleaks scans the repository for accidentally committed secrets.
-
-It can detect:
-
-* AWS credentials
-* API keys
-* Passwords
-* Tokens
-* Private keys
-* Sensitive credentials
-
-If a secret is detected, the pipeline can stop before deployment.
+| Layer | Tools |
+|---|---|
+| **Cloud** | AWS EC2, IAM, Amazon ECR, AWS CLI |
+| **Infrastructure as Code** | Terraform |
+| **CI/CD** | Jenkins, GitHub webhook integration |
+| **Containerization** | Docker, Docker Compose |
+| **Orchestration** | k3s (lightweight Kubernetes), Helm |
+| **Security (DevSecOps)** | Trivy (image vulnerability scanning), Gitleaks (secret scanning) |
+| **Monitoring** | Prometheus, Grafana, Kubernetes Metrics |
+| **Application** | Node.js (backend), HTML/JS (frontend), Redis |
 
 ---
 
-# 🛡️ Trivy
+## 🔄 CI/CD Pipeline Flow
 
-Trivy scans Docker images for security vulnerabilities.
-
-```text
-Docker Image
-     ↓
-   Trivy
-     ↓
-OS Packages
-Dependencies
-Libraries
-Known CVEs
-     ↓
-Security Decision
-```
-
-This helps prevent vulnerable container images from being deployed.
+1. Developer pushes code to GitHub
+2. Jenkins automatically triggers the pipeline via webhook
+3. Source code is checked out
+4. Application unit tests run
+5. **Gitleaks** scans the repository for exposed secrets (AWS keys, tokens, passwords)
+6. Docker images are built for the backend and frontend services
+7. **Trivy** scans each image for OS and dependency vulnerabilities
+8. Images are pushed to **Amazon ECR** (authenticated via IAM role — no static AWS keys in Jenkins)
+9. **Helm** deploys the new image version to the k3s cluster
+10. Kubernetes manages rollout, health checks, and self-healing
+11. **Prometheus + Grafana** monitor node and pod health post-deployment
 
 ---
 
-# 🐳 Docker
+## 🔐 DevSecOps Security
 
-The project contains two application services:
+Security scanning is wired directly into the Jenkins pipeline as a blocking gate — a failed scan stops the build the same way a failed test would.
 
-```text
-services/
-├── frontend/
-│   └── Dockerfile
-│
-└── backend/
-    └── Dockerfile
-```
+### Gitleaks — Secret Scanning
+Scans the repository and commit history for:
+- AWS access keys
+- API tokens
+- Passwords and other hardcoded credentials
 
-Jenkins builds both images.
+### Trivy — Vulnerability Scanning
+Scans every built Docker image for:
+- Known OS package CVEs
+- Vulnerable application dependencies
 
-```text
-Frontend Source
-      ↓
-Docker Build
-      ↓
-frontend:<BUILD_NUMBER>
-
-
-Backend Source
-      ↓
-Docker Build
-      ↓
-backend:<BUILD_NUMBER>
-```
+### IAM Role-Based Authentication
+The pipeline authenticates to AWS using an **IAM role attached to the EC2 instance** running Jenkins — not a static access key stored in Jenkins credentials. This means:
+- No long-lived AWS secret sitting in the CI system
+- Credentials are short-lived and auto-rotated
+- The role is scoped to only the permissions the pipeline actually needs
 
 ---
 
-# 📦 Amazon ECR
+## ☁️ AWS Infrastructure
 
-Amazon ECR is the private container registry.
-
-Repositories:
-
-```text
-frontend
-backend
-```
-
-Region:
-
-```text
-ap-south-1
-```
-
-Example:
-
-```text
-138300868541.dkr.ecr.ap-south-1.amazonaws.com/frontend:7
-
-138300868541.dkr.ecr.ap-south-1.amazonaws.com/backend:7
-```
-
----
-
-# 🏷️ Docker Image Versioning
-
-Jenkins uses:
-
-```text
-BUILD_NUMBER
-```
-
-as the image tag.
-
-Example:
-
-```text
-BUILD_NUMBER=7
-```
-
-creates:
-
-```text
-frontend:7
-backend:7
-```
-
-Next build:
-
-```text
-BUILD_NUMBER=8
-```
-
-creates:
-
-```text
-frontend:8
-backend:8
-```
-
-This provides:
-
-* Version tracking
-* Easier debugging
-* Deployment history
-* Rollback capability
-
----
-
-# ⛵ Helm
-
-Helm manages the Kubernetes deployment.
-
-Chart location:
-
-```text
-helm/myapp/
-```
-
-Important files:
-
-```text
-helm/myapp/
-├── Chart.yaml
-├── values.yaml
-└── templates/
-    ├── backend-deployment.yaml
-    ├── frontend-deployment.yaml
-    ├── redis.yaml
-    └── services
-```
-
-Jenkins passes the ECR repository and image tag to Helm.
+Provisioned entirely through **Terraform** (see `infra/`):
+- EC2 instance (Jenkins host / cluster node)
+- IAM role and instance profile
+- Security groups
+- Supporting networking and permissions
 
 ```bash
-helm upgrade --install myapp . \
-  --set backend.image.repository=${ECR_REGISTRY}/${BACKEND_REPO} \
-  --set backend.image.tag=${IMAGE_TAG} \
-  --set frontend.image.repository=${ECR_REGISTRY}/${FRONTEND_REPO} \
-  --set frontend.image.tag=${IMAGE_TAG}
-```
-
-The important concept is:
-
-```text
-Jenkins BUILD_NUMBER
-        ↓
-Docker Image Tag
-        ↓
-ECR
-        ↓
-Helm
-        ↓
-Kubernetes Deployment
+cd infra
+terraform init
+terraform plan
+terraform apply
 ```
 
 ---
 
-# ☸️ Amazon EKS
+## 📂 Project Structure
 
-The application runs on Amazon EKS.
-
-Cluster:
-
-```text
-microservices-eks
 ```
-
-Region:
-
-```text
-ap-south-1
-```
-
-Node group:
-
-```text
-microservices-ng
-```
-
-Worker instance type:
-
-```text
-t3.small
-```
-
-Current architecture:
-
-```text
-EKS Cluster
-     │
-     ▼
-Managed Node Group
-     │
-     ├── t3.small
-     │
-     └── t3.small
-```
-
-The EKS control plane manages Kubernetes.
-
-EC2 worker nodes provide compute resources where Pods run.
-
----
-
-# 🖥️ Kubernetes Worker Nodes
-
-The worker nodes currently running the application are:
-
-```text
-Node 1
-172.31.20.63
-t3.small
-
-Node 2
-172.31.46.26
-t3.small
-```
-
-Kubernetes schedules application Pods across these nodes.
-
-Example:
-
-```text
-Node 1
-├── Backend Pod
-├── Frontend Pod
-└── Redis Pod
-
-Node 2
-├── Backend Pod
-└── Frontend Pod
-```
-
-The exact Pod placement can change because Kubernetes decides where Pods should run.
-
----
-
-# 🚀 Kubernetes Workloads
-
-The application contains:
-
-```text
-Frontend
-├── Replica 1
-└── Replica 2
-
-Backend
-├── Replica 1
-└── Replica 2
-
-Redis
-└── Replica 1
-```
-
-Current desired state:
-
-```text
-Frontend → 2 Pods
-Backend  → 2 Pods
-Redis    → 1 Pod
-```
-
----
-
-# 🔗 Kubernetes Services
-
-Services provide stable networking inside Kubernetes.
-
-Without Services:
-
-```text
-Pod
- ↓
-Changing Pod IP
-```
-
-With Services:
-
-```text
-Application
-     ↓
-Kubernetes Service
-     ↓
-Pod
-```
-
-Pods can be replaced while the Service continues providing a stable endpoint.
-
----
-
-# 💾 Redis
-
-Redis is deployed as a Kubernetes workload.
-
-Current configuration:
-
-```text
-Redis
-└── 1 Pod
-```
-
-Redis can be used by the backend for application data, caching, sessions, queues, or other fast-access operations depending on the application implementation.
-
----
-
-# 📊 Monitoring
-
-The monitoring architecture is:
-
-```text
-Kubernetes
-     │
-     │ Metrics
-     ▼
-Prometheus
-     │
-     │ Queries
-     ▼
-Grafana
-     │
-     ▼
-Dashboards
-```
-
-Monitoring can provide visibility into:
-
-* Kubernetes nodes
-* Pods
-* CPU
-* Memory
-* Cluster health
-* Application availability
-* Workload performance
-
----
-
-# 🔑 AWS IAM
-
-IAM controls access to AWS resources.
-
-The project uses IAM-based access where possible instead of placing long-term AWS credentials directly into Jenkins.
-
-Important AWS services:
-
-```text
-IAM
-EKS
-ECR
-EC2
-CloudFormation
-Security Groups
-```
-
----
-
-# 🏗️ Infrastructure
-
-Infrastructure is stored under:
-
-```text
-infra/
-```
-
-The infrastructure layer is responsible for AWS resources required by the project.
-
-Examples include:
-
-* EKS
-* EC2
-* IAM
-* Security Groups
-* Networking
-* Other AWS infrastructure
-
-Infrastructure as Code makes the environment reproducible and easier to manage.
-
----
-
-# 📂 Project Structure
-
-```text
 microservices-project/
-│
-├── Jenkinsfile
-├── Jenkinsfile.backup
-├── README.md
-├── docker-compose.yml
-│
+├── Jenkinsfile              # CI/CD pipeline definition
+├── docker-compose.yml       # Local multi-service dev environment
+├── infra/                   # Terraform - AWS infrastructure (EC2, IAM, security groups)
 ├── services/
-│   ├── frontend/
-│   │   ├── Dockerfile
-│   │   └── application files
-│   │
-│   └── backend/
-│       ├── Dockerfile
-│       └── application files
-│
+│   ├── backend/              # Node.js backend service
+│   └── frontend/             # HTML/JS frontend service
 ├── helm/
-│   └── myapp/
-│       ├── Chart.yaml
-│       ├── values.yaml
-│       └── templates/
-│           ├── backend-deployment.yaml
-│           ├── frontend-deployment.yaml
-│           ├── redis.yaml
-│           └── ...
-│
-└── infra/
-    └── AWS infrastructure
+│   └── myapp/                 # Helm chart for Kubernetes deployment
+└── README.md
 ```
 
 ---
 
-# 🔍 Deployment Verification
+## 💻 Running Locally
 
-After deployment, Jenkins verifies the Kubernetes environment.
-
-## Check EKS Cluster
+Spin up the full stack (frontend, backend, Redis) locally with Docker Compose before touching the Kubernetes/cloud path:
 
 ```bash
-aws eks describe-cluster \
-  --name microservices-eks \
-  --region ap-south-1
+git clone https://github.com/Vishnu063/microservices-project.git
+cd microservices-project
+docker-compose up --build
 ```
 
-## Configure kubectl
+This is the fastest way to verify the application itself works before running it through the full CI/CD pipeline.
+
+---
+
+## ☸️ Deployment
+
+Once infrastructure is provisioned and images are in ECR, deploy to the k3s cluster with Helm:
 
 ```bash
-aws eks update-kubeconfig \
-  --region ap-south-1 \
-  --name microservices-eks
+helm upgrade --install myapp ./helm/myapp \
+  --set image.tag=<build-tag> \
+  --namespace myapp --create-namespace
 ```
 
-## Check Nodes
+Kubernetes then handles:
+- Rolling updates
+- Health checks (liveness/readiness)
+- Automatic restarts on failure
+- Replica management via ReplicaSets
+
+---
+
+## 📊 Monitoring
+
+Prometheus scrapes cluster and pod-level metrics; Grafana visualizes them.
+
+Tracked metrics include:
+- Node CPU / memory utilization
+- Pod health and restart counts
+- Overall cluster performance
+
+---
+
+## 🔧 Useful Commands
 
 ```bash
-kubectl get nodes -o wide
-```
+# Check running pods
+kubectl get pods -n myapp
 
-## Check All Pods
+# Check Helm release history
+helm history myapp -n myapp
 
-```bash
-kubectl get pods -A
-```
+# Roll back to the previous release
+helm rollback myapp -n myapp
 
-## Check Deployments
+# Check images stored in ECR
+aws ecr describe-images --repository-name microservices-project
 
-```bash
-kubectl get deployments
-```
-
-## Check Services
-
-```bash
-kubectl get services
-```
-
-## Check Helm
-
-```bash
-helm list
-```
-
-## Check Backend Image
-
-```bash
-kubectl get deployment myapp-backend \
-  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
-```
-
-## Check Frontend Image
-
-```bash
-kubectl get deployment myapp-frontend \
-  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
-```
-
-## Check ECR Backend Images
-
-```bash
-aws ecr list-images \
-  --repository-name backend \
-  --region ap-south-1
-```
-
-## Check ECR Frontend Images
-
-```bash
-aws ecr list-images \
-  --repository-name frontend \
-  --region ap-south-1
+# Tail Jenkins pipeline logs
+# (from Jenkins UI: Build → Console Output)
 ```
 
 ---
 
-# 🧪 Troubleshooting
+## 🗺️ Roadmap
 
-## Check Pod Status
+Planned hardening to close the gap between "security scanning exists" and "security is fully enforced":
 
-```bash
-kubectl get pods -o wide
-```
-
-## Describe a Pod
-
-```bash
-kubectl describe pod <POD_NAME>
-```
-
-## Check Pod Logs
-
-```bash
-kubectl logs <POD_NAME>
-```
-
-## Check Backend Deployment
-
-```bash
-kubectl describe deployment myapp-backend
-```
-
-## Check Frontend Deployment
-
-```bash
-kubectl describe deployment myapp-frontend
-```
-
-## Check Current Images
-
-```bash
-kubectl get deployments \
-  -o custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image
-```
-
-## Check Helm Values
-
-```bash
-helm get values myapp
-```
-
-## Check Helm Manifest
-
-```bash
-helm get manifest myapp
-```
+- [ ] **Checkov** — Terraform IaC scanning (catch misconfigured security groups/IAM before `apply`)
+- [ ] **Kyverno** — policy-as-code admission control (block `:latest` tags, enforce non-root containers, mandatory resource limits)
+- [ ] **Syft** — SBOM generation for every built image
+- [ ] **cosign** — image signing, with signature verification at deploy time
+- [ ] **ArgoCD** — GitOps-based deployment with automated drift correction, replacing manual `helm upgrade`
+- [ ] Staging environment ahead of the production-style deployment path
+- [ ] Runtime secrets via AWS Secrets Manager / HashiCorp Vault instead of Helm values
 
 ---
 
-# 🧠 Important Design Decisions
+## 🎯 Key Achievements
 
-## Why Jenkins?
-
-Jenkins connects the entire CI/CD process:
-
-```text
-GitHub
- ↓
-Security
- ↓
-Testing
- ↓
-Docker
- ↓
-Trivy
- ↓
-ECR
- ↓
-Helm
- ↓
-EKS
-```
+- ✅ Automated end-to-end CI/CD pipeline using Jenkins
+- ✅ AWS infrastructure provisioned as code with Terraform
+- ✅ Microservices containerized with Docker
+- ✅ Private image storage and management via Amazon ECR
+- ✅ Kubernetes deployment templated and versioned with Helm
+- ✅ Security scanning (secrets + vulnerabilities) enforced as a pipeline gate
+- ✅ IAM role-based AWS authentication — no static credentials in CI
+- ✅ Cluster and application monitoring with Prometheus + Grafana
 
 ---
 
-## Why Gitleaks?
+## 💼 Resume Summary
 
-To detect secrets before they reach later stages of the pipeline.
-
----
-
-## Why Trivy?
-
-To identify known vulnerabilities in container images before deployment.
+> Built an end-to-end DevSecOps CI/CD platform on AWS — provisioning infrastructure with Terraform, running a Jenkins-based pipeline that gates on Gitleaks secret scanning and Trivy image vulnerability scanning, containerizing services with Docker, managing images through Amazon ECR with IAM role-based authentication, deploying to Kubernetes via Helm, and monitoring the cluster with Prometheus and Grafana.
 
 ---
 
-## Why Docker?
-
-Docker packages the application and its dependencies into portable container images.
-
----
-
-## Why ECR?
-
-ECR provides a private AWS container registry that integrates with AWS IAM and EKS.
-
----
-
-## Why Helm?
-
-Helm makes Kubernetes deployments reusable and allows image repositories and tags to be supplied dynamically.
-
----
-
-## Why EKS?
-
-EKS provides a managed Kubernetes control plane while EC2 worker nodes provide application compute capacity.
-
----
-
-## Why Image Tags?
-
-Image tags connect a Jenkins build to a specific application version.
-
-Example:
-
-```text
-Jenkins Build 7
-       ↓
-frontend:7
-backend:7
-       ↓
-ECR
-       ↓
-Helm
-       ↓
-EKS
-```
-
----
-
-# 🎯 DevSecOps Concepts Demonstrated
-
-```text
-Source Control
-      +
-CI/CD
-      +
-Security
-      +
-Testing
-      +
-Containerization
-      +
-Container Security
-      +
-Container Registry
-      +
-Infrastructure as Code
-      +
-Kubernetes
-      +
-Helm
-      +
-Monitoring
-```
-
-Implemented:
-
-* ✅ GitHub
-* ✅ Jenkins
-* ✅ Gitleaks
-* ✅ Application Testing
-* ✅ Docker
-* ✅ Trivy
-* ✅ Amazon ECR
-* ✅ Amazon EKS
-* ✅ Kubernetes
-* ✅ Helm
-* ✅ AWS IAM
-* ✅ Kubernetes Services
-* ✅ Application Replicas
-* ✅ Prometheus
-* ✅ Grafana
-* ✅ Deployment Verification
-
----
-
-# 💼 Resume Description
-
-Built an end-to-end AWS DevSecOps CI/CD platform using Jenkins, Docker, Amazon ECR, Amazon EKS and Helm. Implemented automated source checkout, Gitleaks secret scanning, application testing, Trivy container vulnerability scanning, Docker image versioning, ECR image publishing and Helm-based Kubernetes deployments. Deployed frontend, backend and Redis workloads on EKS using managed EC2 worker nodes and implemented deployment verification, IAM-based AWS authentication and Prometheus/Grafana monitoring.
-
----
-
-# 👨‍💻 Author
+## 👨‍💻 Author
 
 **Vishnu Kushwaha**
-
-DevOps / DevSecOps Engineer
-
----
-
-# ⭐ Project Objective
-
-The objective of this project is to demonstrate a real-world DevSecOps workflow where application delivery is automated from source code to a running Kubernetes workload.
-
-```text
-CODE
- ↓
-SECURITY
- ↓
-TEST
- ↓
-BUILD
- ↓
-SCAN
- ↓
-PUSH
- ↓
-DEPLOY
- ↓
-VERIFY
- ↓
-MONITOR
-```
-
-The final goal is a repeatable, secure and automated software delivery platform.
-EOF
-
-echo
-echo "===== README UPDATED SUCCESSFULLY ====="
-wc -l README.md
-echo
-echo "===== FIRST 20 LINES ====="
-head -20 README.md
-echo
-echo "===== README BACKUP ====="
-ls -lh README.md README.backup.md
-
-````
+DevSecOps Engineer
+[GitHub](https://github.com/Vishnu063)
