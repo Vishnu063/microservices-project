@@ -210,11 +210,42 @@ dir('helm/myapp') {
 
 sh '''
 
+set -eu
+
+echo "===== DEPLOY VARIABLES ====="
+
+echo "ECR_REGISTRY=${ECR_REGISTRY}"
+echo "BACKEND_REPO=${BACKEND_REPO}"
+echo "FRONTEND_REPO=${FRONTEND_REPO}"
+echo "IMAGE_TAG=${IMAGE_TAG}"
+
+test -n "${ECR_REGISTRY}"
+test -n "${BACKEND_REPO}"
+test -n "${FRONTEND_REPO}"
+test -n "${IMAGE_TAG}"
+
+BACKEND_IMAGE="${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}"
+FRONTEND_IMAGE="${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}"
+
+echo "Backend image: ${BACKEND_IMAGE}"
+echo "Frontend image: ${FRONTEND_IMAGE}"
+
+echo "===== HELM RENDER TEST ====="
+
+helm template myapp . \
+  --set backend.image.repository="${ECR_REGISTRY}/${BACKEND_REPO}" \
+  --set backend.image.tag="${IMAGE_TAG}" \
+  --set frontend.image.repository="${ECR_REGISTRY}/${FRONTEND_REPO}" \
+  --set frontend.image.tag="${IMAGE_TAG}" \
+  | grep -E 'image:'
+
+echo "===== HELM DEPLOY ====="
+
 helm upgrade --install myapp . \
---set backend.image.repository=${ECR_REGISTRY}/${BACKEND_REPO} \
---set backend.image.tag=${IMAGE_TAG} \
---set frontend.image.repository=${ECR_REGISTRY}/${FRONTEND_REPO} \
---set frontend.image.tag=${IMAGE_TAG}
+  --set backend.image.repository="${ECR_REGISTRY}/${BACKEND_REPO}" \
+  --set backend.image.tag="${IMAGE_TAG}" \
+  --set frontend.image.repository="${ECR_REGISTRY}/${FRONTEND_REPO}" \
+  --set frontend.image.tag="${IMAGE_TAG}"
 
 '''
 
