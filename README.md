@@ -1,8 +1,3 @@
-cd ~/microservices-project
-
-cp README.md README.backup.md
-
-cat > README.md <<'EOF'
 # 🚀 Microservices DevSecOps CI/CD Platform
 
 A production-style **DevSecOps CI/CD platform built on AWS**.
@@ -546,12 +541,3 @@ VERIFY
  ↓
 MONITOR
 The final goal is a repeatable, secure and automated software delivery platform.
-EOF
-echo "===== README UPDATED ====="
-wc -l README.md
-head -20 README.md
-
-**Important:** I included this backup first:
-
-```bash
-cp README.md README.backup.md
